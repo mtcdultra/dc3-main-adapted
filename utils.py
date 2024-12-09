@@ -6,7 +6,7 @@ torch.set_default_dtype(torch.float64)
 import numpy as np
 import osqp
 from qpth.qp import QPFunction
-import ipopt
+import cyipopt
 from scipy.linalg import svd
 from scipy.sparse import csc_matrix
 
@@ -19,8 +19,7 @@ from pypower.api import case57
 from pypower.api import opf, makeYbus
 from pypower import idx_bus, idx_gen, ppoption
 
-DEVICE = torch.device("cuda") if torch.cuda.is_available() else torch.device("cpu")
-
+DEVICE = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
 def str_to_bool(value):
     if isinstance(value, bool):
@@ -34,6 +33,217 @@ def str_to_bool(value):
 def my_hash(string):
     return hashlib.sha1(bytes(string, 'utf-8')).hexdigest()
 
+
+###################################################################
+
+# PROBLEM NON LINEAR
+
+###################################################################
+
+class Problem_Non_Linear:
+    def __init__(self, X, valid_frac=0.0833, test_frac=0.0833):
+
+        self._X = torch.tensor(X)
+        self._xdim = X.shape[1]
+        self._ydim = 2
+        self._num = X.shape[0]
+        self._nknowns = 0
+        self._valid_frac = valid_frac
+        self._test_frac = test_frac
+
+        self._device = None
+
+    @property
+    def device(self):
+        return self._device
+
+    @property
+    def X(self):
+        return self._X
+
+    @property
+    def xdim(self):
+        return self._xdim
+
+    @property
+    def ydim(self):
+        return self._ydim
+
+    @property
+    def num(self):
+        return self._num
+
+    @property
+    def nknowns(self):
+        return self._nknowns
+
+    @property
+    def valid_frac(self):
+        return self._valid_frac
+
+    @property
+    def test_frac(self):
+        return self._test_frac
+
+    @property
+    def train_frac(self):
+        return 1 - self.valid_frac - self.test_frac
+
+    @property
+    def trainX(self):
+        return self.X[: int(self.train_frac * self.num)]
+
+    @property
+    def validX(self):
+        return self.X[
+            int(self.train_frac * self.num) : int(
+                (self.num * (self.train_frac + self.valid_frac))
+            )
+        ]
+
+    @property
+    def testX(self):
+        return self.X[int(self.num * (self.train_frac + self.valid_frac)) :]
+
+    def obj_fn(self, x):
+        
+        x1 = x[:, 0]
+        x2 = x[:, 1]
+
+        return x1 * ((x1 - x2) ** 2 + (x1 - 2)) + 5
+
+    def eq_resid(self, x, y):
+
+        x1 = x[:, 0]
+        x2 = x[:, 1]
+
+        return x1**2 / 2 + 1.5 * x2**2 - 1.2
+
+    def ineq_resid(self, x):
+
+        x1 = x[:, 0]
+        x2 = x[:, 1]
+        
+        return 0.75 * x1**2 + 0.25 * x2**2 - 0.5
+
+    def ineq_dist(self, x, y):
+        """
+        Clampe os resíduos de desigualdade.
+        """
+        #x1 = x[:, 0]
+        #x2 = x[:, 1]
+        
+        resids = self.ineq_resid(x)
+        
+        resids = resids.unsqueeze(1)
+        
+        return torch.clamp(resids, 0)
+
+    def eq_grad(self, x, y):
+        """
+        Gradiente do resíduo de igualdade.
+        Derivadas parciais:
+        """        
+        
+        #print('Y ', y)
+
+        y1 = y[:, 0].unsqueeze(1)
+        y2 = y[:, 1].unsqueeze(1)
+
+        
+        x1 = x[:, 0]
+        x2 = x[:, 1]
+        
+#        y = y.reshape(-1)
+        
+        grad_x1 = x1 * y1
+        grad_x2 = (3 * x2) * y2
+
+        grad_sum = grad_x1 + grad_x2
+
+        #return torch.stack((grad_x1, grad_x2), dim=1)
+
+        return grad_sum.unsqueeze(1)    
+
+    def ineq_grad(self, x, y):
+        """
+        Gradiente do resíduo de desigualdade.
+        Derivadas parciais:
+        """
+        x1 = x[:, 0]
+        x2 = x[:, 1]
+                
+        # Calcula a distância clamped
+        dist = self.ineq_dist(x, y)  # Tamanho esperado: [25]
+
+        grad_x1 = (1.5 * x1)
+        grad_x2 = (0.5 * x2)
+
+        y1 = y[:, 0].unsqueeze(1)
+        y2 = y[:, 1].unsqueeze(1)
+
+        grad_x1 = y1 * grad_x1.unsqueeze(1)
+        grad_x2 = y2 * grad_x2.unsqueeze(1)
+
+
+        grad_x1_scaled = grad_x1 * dist
+        grad_x2_scaled = grad_x2 * dist
+        
+        
+        grad = torch.cat((grad_x1_scaled, grad_x2_scaled), dim=1)
+                
+        return grad
+        
+    
+    def ineq_partial_grad(self, X):
+        # Resíduo ajustado (clamp para respeitar desigualdades)
+        x1 = X[:, 0]
+        x2 = X[:, 1]
+        grad = self.ineq_dist(x1, x2)
+
+        # Inicialização do tensor para gradientes
+        Y = torch.zeros(X.shape[0], X.shape[1], device=self.device)
+
+        # Aplicar gradientes às variáveis parciais
+        Y[:, 0] = grad * 1.5 * x1  # Gradiente para x1
+        Y[:, 1] = grad * 0.5 * x2  # Gradiente para x2
+
+        # Retornar gradientes ajustados
+        return Y
+    
+    
+    def process_output(self, x, z):
+        """
+        Processa a saída intermediária.
+        """
+        # x1 = x[:, 0]
+        # x2 = x[:, 1]
+
+        return z
+
+    def complete_partial(self, X, Z):
+        """
+        Solução para o conjunto completo de variáveis, adaptada para a estrutura atual de variáveis parciais e outras variáveis.
+        """
+        # Inicializa o tensor de saída Y com zeros
+        Y = torch.zeros(X.shape[0], X.shape[1], device=self.device)
+        
+        # Atribui Z às variáveis parciais em Y
+        Y[:, self.partial_vars] = Z
+        
+        # Calcula as variáveis restantes com base na solução do sistema de equações
+        Y[:, self.other_vars] = (X - Z @ self._A_partial.T) @ self._A_other_inv.T
+        
+        # Adaptação para considerar o gradiente de desigualdade, se necessário.
+        # Calcula o gradiente para as variáveis de desigualdade ajustadas, se aplicável
+        ineq_grad = self.ineq_partial_grad(X)
+        
+        # Atualiza Y com base nos gradientes de desigualdade, se essa funcionalidade for relevante.
+        # Esta parte pode ser modificada dependendo da necessidade de aplicar gradientes adicionais.
+        Y[:, self.partial_vars] += ineq_grad[:, self.partial_vars]  # Atualiza variáveis parciais com o gradiente
+        
+        # Retorna o vetor de solução completo Y
+        return Y
 
 ###################################################################
 # SIMPLE PROBLEM
@@ -241,17 +451,22 @@ class SimpleProblem:
         Y = torch.zeros(X.shape[0], self.ydim, device=self.device)
         Y[:, self.partial_vars] = grad
         Y[:, self.other_vars] = - (grad @ self._A_partial.T) @ self._A_other_inv.T
+        
+        
         return Y
 
     # Processes intermediate neural network output
     def process_output(self, X, Y):
+        #print('PROCESS OUTPUT')
         return Y
 
     # Solves for the full set of variables
     def complete_partial(self, X, Z):
+        #print('COMPLETE PARTIAL')
         Y = torch.zeros(X.shape[0], self.ydim, device=self.device)
         Y[:, self.partial_vars] = Z
         Y[:, self.other_vars] = (X - Z @ self._A_partial.T) @ self._A_other_inv.T
+        print('COMPLETE PARTIAL')
         return Y
 
     def opt_solve(self, X, solver_type='osqp', tol=1e-4):
@@ -305,6 +520,51 @@ class SimpleProblem:
         self._Y = torch.tensor(Y[feas_mask])
         return Y
 
+
+
+    def plot_obj_fn(self, fixed_y=None):
+        import matplotlib.pyplot as plt
+        from mpl_toolkits.mplot3d import Axes3D
+        import numpy as np
+
+        # Verifica se o problema é bidimensional
+        if self.ydim != 2 and fixed_y is None:
+            raise ValueError("O gráfico só pode ser gerado para problemas bidimensionais ou com variáveis fixadas.")
+
+        # Fixar variáveis adicionais, se necessário
+        if fixed_y is not None:
+            fixed_y = torch.tensor(fixed_y, dtype=torch.float32)
+            if len(fixed_y) != self.ydim:
+                raise ValueError("O vetor fixed_y deve ter dimensão igual a ydim.")
+
+        # Criar uma malha de valores para y1 e y2
+        y1 = np.linspace(-3, 3, 100)
+        y2 = np.linspace(-3, 3, 100)
+        Y1, Y2 = np.meshgrid(y1, y2)
+
+        # Avaliar a função objetivo na malha
+        Z = np.zeros_like(Y1)
+        for i in range(Y1.shape[0]):
+            for j in range(Y1.shape[1]):
+                # Criar o vetor y com valores fixados, se necessário
+                y = torch.zeros(self.ydim)
+                y[0] = Y1[i, j]
+                y[1] = Y2[i, j]
+                if fixed_y is not None:
+                    y[2:] = fixed_y[2:]  # Fixar as demais variáveis
+                Z[i, j] = self.obj_fn(y.unsqueeze(0)).item()  # Calcular a função objetivo
+
+        # Plotar o gráfico 3D
+        fig = plt.figure()
+        ax = fig.add_subplot(111, projection='3d')
+        ax.plot_surface(Y1, Y2, Z, cmap='viridis', edgecolor='none')
+
+        # Configurar rótulos
+        ax.set_title("Função Objetivo Quadrática")
+        ax.set_xlabel("$y_1$")
+        ax.set_ylabel("$y_2$")
+        ax.set_zlabel("Valor da Função Objetivo")
+        plt.show()
 
 ###################################################################
 # NONCONVEX PROBLEM
@@ -488,7 +748,12 @@ class NonconvexProblem:
         return self._device
 
     def obj_fn(self, Y):
-        return (0.5*(Y@self.Q)*Y + self.p*torch.sin(Y)).sum(dim=1)
+        #return (0.5*(Y@self.Q)*Y + self.p*torch.sin(Y)).sum(dim=1)
+    
+        #return (0.5 * (Y @ torch.tensor(self.Q)) * Y + self.p * torch.sin(Y)).sum(dim=1)
+    
+        return (0.5 * (torch.tensor(Y) @ self.Q) * torch.tensor(Y) + self.p * torch.sin(torch.tensor(Y))).sum(dim=1)
+
 
     def eq_resid(self, X, Y):
         return X - Y@self.A.T
@@ -524,13 +789,13 @@ class NonconvexProblem:
         Y[:, self.other_vars] = (X - Z @ self._A_partial.T) @ self._A_other_inv.T
         return Y
 
-    def opt_solve(self, X, solver_type='ipopt', tol=1e-4):
+    def opt_solve(self, X, solver_type='cyipopt', tol=1e-4):
         Q, p, A, G, h = self.Q_np, self.p_np, self.A_np, self.G_np, self.h_np
         X_np = X.detach().cpu().numpy()
         Y = []
         total_time = 0
         for Xi in X_np:
-            if solver_type == 'ipopt':
+            if solver_type == 'cyipopt':
                 y0 = np.linalg.pinv(A)@Xi  # feasible initial point
 
                 # upper and lower bounds on variables
@@ -541,7 +806,7 @@ class NonconvexProblem:
                 cl = np.hstack([Xi, -np.inf * np.ones(G.shape[0])])
                 cu = np.hstack([Xi, h])
 
-                nlp = ipopt.problem(
+                nlp = cyipopt.Problem(
                             n=len(y0),
                             m=len(cl),
                             problem_obj=nonconvex_ipopt(Q, p, A, G),
@@ -551,8 +816,8 @@ class NonconvexProblem:
                             cu=cu
                             )
 
-                nlp.addOption('tol', tol)
-                nlp.addOption('print_level', 0) # 3)
+                nlp.add_option('tol', tol)
+                nlp.add_option('print_level', 0) # 3)
 
                 start_time = time.time()
                 y, info = nlp.solve(y0)
@@ -571,6 +836,50 @@ class NonconvexProblem:
         self._X = self._X[feas_mask]
         self._Y = torch.tensor(Y[feas_mask])
         return Y
+
+    def plot_obj_fn(self, fixed_y=None):
+        import matplotlib.pyplot as plt
+        from mpl_toolkits.mplot3d import Axes3D
+        import numpy as np
+
+        # Verifica se o problema é bidimensional
+        if self.ydim != 2 and fixed_y is None:
+            raise ValueError("O gráfico só pode ser gerado para problemas bidimensionais ou com variáveis fixadas.")
+
+        # Fixar variáveis adicionais, se necessário
+        if fixed_y is not None:
+            fixed_y = torch.tensor(fixed_y, dtype=torch.float32)
+            if len(fixed_y) != self.ydim:
+                raise ValueError("O vetor fixed_y deve ter dimensão igual a ydim.")
+
+        # Criar uma malha de valores para y1 e y2
+        y1 = np.linspace(-3, 3, 100)
+        y2 = np.linspace(-3, 3, 100)
+        Y1, Y2 = np.meshgrid(y1, y2)
+
+        # Avaliar a função objetivo na malha
+        Z = np.zeros_like(Y1)
+        for i in range(Y1.shape[0]):
+            for j in range(Y1.shape[1]):
+                # Criar o vetor y com valores fixados, se necessário
+                y = torch.zeros(self.ydim)
+                y[0] = Y1[i, j]
+                y[1] = Y2[i, j]
+                if fixed_y is not None:
+                    y[2:] = fixed_y[2:]  # Fixar as demais variáveis
+                Z[i, j] = self.obj_fn(y.unsqueeze(0)).item()  # Calcular a função objetivo
+
+        # Plotar o gráfico 3D
+        fig = plt.figure()
+        ax = fig.add_subplot(111, projection='3d')
+        ax.plot_surface(Y1, Y2, Z, cmap='viridis', edgecolor='none')
+
+        # Configurar rótulos
+        ax.set_title("Função Objetivo Quadrática")
+        ax.set_xlabel("$y_1$")
+        ax.set_ylabel("$y_2$")
+        ax.set_zlabel("Valor da Função Objetivo")
+        plt.show()
 
 class nonconvex_ipopt(object):
     def __init__(self, Q, p, A, G):

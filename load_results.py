@@ -42,7 +42,7 @@ def get_status_results(exper_dirs):
     all_stats = {}
 
     opt_methods = dict([
-            ('simple', ['osqp', 'qpth']), ('nonconvex', ['ipopt']), ('acopf', ['pypower'])
+            ('simple', ['osqp', 'qpth']), ('nonconvex', ['cyipopt']), ('acopf', ['pypower'])
     ])
     nn_baseline_dirs = [('baseline_nn', 'baselineNN'), ('baseline_eq_nn', 'baselineEqNN')]
 

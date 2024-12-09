@@ -88,7 +88,7 @@ def main():
     if prob_type == 'simple':
         solvers = ['osqp', 'qpth']
     elif prob_type == 'nonconvex':
-        solvers = ['ipopt']
+        solvers = ['cyipopt']
     else:
         solvers = ['pypower']
 
