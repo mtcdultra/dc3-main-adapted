@@ -151,19 +151,18 @@ class Problem_Non_Linear:
         y2 = y[:, 1].unsqueeze(1)
 
         
-        x1 = x[:, 0]
-        x2 = x[:, 1]
+        x1 = x[:, 0].unsqueeze(1)
+        x2 = x[:, 1].unsqueeze(1)
         
 #        y = y.reshape(-1)
         
         grad_x1 = x1 * y1
         grad_x2 = (3 * x2) * y2
-
-        grad_sum = grad_x1 + grad_x2
-
-        #return torch.stack((grad_x1, grad_x2), dim=1)
-
-        return grad_sum.unsqueeze(1)    
+        
+        
+        grad = torch.cat((grad_x1, grad_x2), dim=1)
+        
+        return grad
 
     def ineq_grad(self, x, y):
         """
@@ -425,6 +424,7 @@ class SimpleProblem:
         return self._device
 
     def obj_fn(self, Y):
+        print('entrou funcao objetivo')
         return (0.5*(Y@self.Q)*Y + self.p*Y).sum(dim=1)
 
     def eq_resid(self, X, Y):
@@ -464,8 +464,12 @@ class SimpleProblem:
     def complete_partial(self, X, Z):
         #print('COMPLETE PARTIAL')
         Y = torch.zeros(X.shape[0], self.ydim, device=self.device)
+        print('Y antes', Y.shape)
         Y[:, self.partial_vars] = Z
+        
+        print('Y partial vars', Y.shape)
         Y[:, self.other_vars] = (X - Z @ self._A_partial.T) @ self._A_other_inv.T
+        print('Y other vars', Y.shape)
         print('COMPLETE PARTIAL')
         return Y
 
@@ -748,13 +752,8 @@ class NonconvexProblem:
         return self._device
 
     def obj_fn(self, Y):
-        #return (0.5*(Y@self.Q)*Y + self.p*torch.sin(Y)).sum(dim=1)
+        return (0.5*(Y@self.Q)*Y + self.p*torch.sin(Y)).sum(dim=1)
     
-        #return (0.5 * (Y @ torch.tensor(self.Q)) * Y + self.p * torch.sin(Y)).sum(dim=1)
-    
-        return (0.5 * (torch.tensor(Y) @ self.Q) * torch.tensor(Y) + self.p * torch.sin(torch.tensor(Y))).sum(dim=1)
-
-
     def eq_resid(self, X, Y):
         return X - Y@self.A.T
 
@@ -784,9 +783,20 @@ class NonconvexProblem:
 
     # Solves for the full set of variables
     def complete_partial(self, X, Z):
+        print('Inicio Complete Partial')
+        #print('COMPLETE PARTIAL')
         Y = torch.zeros(X.shape[0], self.ydim, device=self.device)
+        print('Y antes', Y.shape)
+        #print('Y ', Y[0])
         Y[:, self.partial_vars] = Z
+        print('Z (out) ', Z.shape)
+        #print('Z ', Z[0])
+        print('Y partial vars', Y.shape)
+        #print('Y partial vars', Y[0])
         Y[:, self.other_vars] = (X - Z @ self._A_partial.T) @ self._A_other_inv.T
+        print('Y other vars', Y.shape)
+        print('Fim Complete Partial')
+        
         return Y
 
     def opt_solve(self, X, solver_type='cyipopt', tol=1e-4):

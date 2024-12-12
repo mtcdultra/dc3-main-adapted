@@ -3,7 +3,10 @@ import numpy as np
 import pandas as pd
 
 # Função para plotar os contornos
-def plot_contours(data):
+import numpy as np
+import matplotlib.pyplot as plt
+
+def plot_nonlinear(data):
     fig, ax = plt.subplots(figsize=(6, 6))
 
     # Linhas para criar o grid de contornos
@@ -29,12 +32,6 @@ def plot_contours(data):
     ineq_resid_vals = data.ineq_resid(X_vec)    
     ineq_resid_vals = ineq_resid_vals.reshape(x1_vec.shape)  # Reshape para 2D
 
-    # Função objetivo para o contorno (passando X_vec)
-    obj_fn_plot_vals = data.obj_fn_plot(X_vec, 1, 1)  # rh=1, rg=1
-    obj_fn_plot_vals = obj_fn_plot_vals.reshape(x1_vec.shape)  # Reshape para 2D
-
-    print(f"Shape of obj_fn_plot_vals: {obj_fn_plot_vals.shape}")
-
     # Plotando o contorno da função objetivo
     cp = ax.contour(
         x1_vec, x2_vec, z, levels=np.linspace(-5, 200, 300), cmap="viridis"
@@ -45,17 +42,20 @@ def plot_contours(data):
     cg1 = ax.contour(x1_vec, x2_vec, eq_resid_vals, levels=[0], colors="red", linewidths=2)
     cg2 = ax.contour(x1_vec, x2_vec, ineq_resid_vals, levels=[0], colors="blue", linewidths=2)
 
-    # Contorno da função objetivo (amarelo)
-    cg3 = ax.contour(
-        x1_vec, x2_vec, obj_fn_plot_vals, levels=[0], colors="yellow", linewidths=2
-    )
+    # Plotando os pontos de x1_ e x2_ sobre os contornos
+    # Colorindo os pontos com base nos valores da função objetivo
+    scatter = ax.scatter(x1_, x2_, c=data.obj_fn(data.trainX), cmap='viridis', edgecolors='black', label='Pontos')
 
-    # Plotando a trajetória (se fornecida)
-    #print(trajectory)
-    
-    
-        # Adicionando título e labels
-    plt.title("Contours of the objective function")
+
+    # Adicionando barra de cores
+#    plt.colorbar(scatter, label="Objetivo")
+
+
+    for i, (xi, xj) in enumerate(zip(x1_, x2_)):
+        ax.annotate(f'{i}', (xi, xj), textcoords="offset points", xytext=(5, 5), ha='center', fontsize=8, color='red')
+
+    # Adicionando título e labels
+    plt.title("Contours of the objective function with points - non-linear problem")    
     plt.xlabel("x1")
     plt.ylabel("x2")
     plt.grid(True)
@@ -63,5 +63,5 @@ def plot_contours(data):
     # Adicionando legenda
     plt.legend()
 
+    # Exibindo o gráfico
     plt.show()
-

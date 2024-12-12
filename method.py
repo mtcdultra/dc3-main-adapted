@@ -25,9 +25,17 @@ import default_args
 
 import matplotlib.pyplot as plt
 
-from plot_contours import plot_contours as plot_contours_1
-from plot_contours_v2 import plot_contours as plot_contours_2
-from plot_contours_v3 import plot_contours as plot_contours_3
+from scipy.interpolate import griddata  
+
+from plot_nonlinear import plot_nonlinear
+from plot_nonconvex import plot_nonconvex
+
+#from plot_scatter import plot_scatter
+#from plot_contours_non_linear import plot_contours_non_linear
+#from plot_scatter_nonconvex import plot_scatter_nonconvex
+#from plot_nonconvex import plot_nonconvex
+
+
 
 DEVICE = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     
@@ -133,26 +141,12 @@ def main():
     
     # Run method
     train_net(data, args, save_dir)
-
-
-
-
-def plot(x, y):
-    x1 = x[:, 0]
-    x2 = x[:, 1]
     
-    fig, ax = plt.subplots(figsize=(6, 6))
-    scatter = ax.scatter(x1, x2, c=y, cmap='viridis')
     
-    # Adicionar os índices da matriz como rótulos nos pontos
-    for i, (xi, xj) in enumerate(zip(x1, x2)):
-        ax.annotate(str(i), (xi, xj), textcoords="offset points", xytext=(5, 5), ha='center', fontsize=8, color='red')
-    
-    plt.colorbar(scatter, label='y')
-    plt.xlabel('x1')
-    plt.ylabel('x2')
-    plt.title('Scatter Plot with Point Labels')
-    plt.show()
+
+
+
+
 
 def train_net(data, args, save_dir):
     
@@ -175,8 +169,9 @@ def train_net(data, args, save_dir):
     stats = {}
     train_losses = []
     
-    #print('Starting training')
-    #print('xtrain shape', data.trainX.shape)
+    print('###')
+    print('###')
+    print('Starting training')
     
     for i in range(nepochs):
         epoch_stats = {}
@@ -187,29 +182,25 @@ def train_net(data, args, save_dir):
         
         for Xtrain in train_loader:
             
-            print('Xtrain shape', Xtrain[0].shape)
+            print('Xtrain inicio')
+                    
             Xtrain = Xtrain[0].to(DEVICE)
+            print('Xtrain shape', Xtrain.shape)
             start_time = time.time()
             solver_opt.zero_grad()
             #print('Xtrain 1o valor', Xtrain[0])
-            #print('xtrain', Xtrain.shape)
             
             Yhat_train = solver_net(Xtrain)
-            
-            #print('Yhat 1o valor', Yhat_train[0])
-            #print('yhat', Yhat_train.shape)            
+            print('treinou o X')
+            print('---')
             
             Ynew_train = grad_steps(data, Xtrain, Yhat_train, args)
-#            print('yhat 1o valor', Ynew_train[0])
-#            print('yhat', Ynew_train.shape)
-
-            #print('Ynew_train 1o valor', Ynew_train[0])
-            #print('Ynew_train', Ynew_train.shape)
-            
             
             if args['probType'] == 'nonlinear':
-            
-                plot(Xtrain.detach().cpu().numpy(), Ynew_train.detach().cpu().numpy())
+                pass
+            #    print('Xtrain ', Xtrain.shape)
+            #    print('Ynew_train ', Ynew_train.shape)
+                #plot(Xtrain.detach().cpu().numpy(), Ynew_train.detach().cpu().numpy())
             
             train_loss = total_loss(data, Xtrain, Ynew_train, args)
             #print('TRAIN LOSS', train_loss)
@@ -220,29 +211,33 @@ def train_net(data, args, save_dir):
             train_time = time.time() - start_time
             dict_agg(epoch_stats, 'train_loss', train_loss.detach().cpu().numpy())
             dict_agg(epoch_stats, 'train_time', train_time, op='sum')
+            print('Xtrain fim')
+            print('X train shape', Xtrain.shape)
             print('- - - - - - - - - ')
-
-            #current_point = Xtrain.detach().cpu().numpy()[:, :2]  # Pega as duas primeiras colunas (x1 e x2)
-            #trajectory.append(current_point.mean(axis=0)) 
-        
-            #print(Ynew_train)
 
         # Get valid loss
         solver_net.eval()
         for Xvalid in valid_loader:
+            #print('Xvalid inicio')
             Xvalid = Xvalid[0].to(DEVICE)
             eval_net(data, Xvalid, solver_net, args, 'valid', epoch_stats)
-
+            #print('Xvalid fim')
+            #print('- - - - - - - - - ')
         # Get test loss
         solver_net.eval()
         for Xtest in test_loader:
+            #print('Xtest inicio')
             Xtest = Xtest[0].to(DEVICE)
             eval_net(data, Xtest, solver_net, args, 'test', epoch_stats)
+            #print('Xtest fim')
+            #print('- - - - - - - - - ')
 
           
         # Média da loss durante a época
         avg_train_loss = np.mean(epoch_stats['train_loss'])
         train_losses.append(avg_train_loss)
+        
+        
         
                 
         print(
@@ -278,27 +273,41 @@ def train_net(data, args, save_dir):
     plt.grid(True)
     plt.savefig('train_loss.png')
     plt.show() 
-    
-        
 
-    
-    
-    
-    if 'nonlinear' in args['probType']:
+
+    if args['probType'] == 'nonlinear':
+
+        plot_nonlinear(data)
+        
+    if args['probType'] == 'nonconvex':
+
+        plot_nonconvex(data.trainX.detach().cpu().numpy(), Ynew_train.detach().cpu().numpy())
+
+
+
+
+    #plot_non_linear(data.trainX.detach().cpu().numpy(), Ynew_train.detach().cpu().numpy())
+
+
+#    if 'nonlinear' in args['probType']:
         #plt.figure(figsize=(10, 6))
-        plot_contours_1(data)
+#        plot_contours_1(data)
         #plot_contours_2(data)
         #plot_contours_3(data, points=np.array(trajectory))
     #else:
     #    data.plot_obj_fn()
     
     
+    #print('Y ', Ynew_train)
+    
     with open(os.path.join(save_dir, 'stats.dict'), 'wb') as f:
         pickle.dump(stats, f)
     with open(os.path.join(save_dir, 'solver_net.dict'), 'wb') as f:
         torch.save(solver_net.state_dict(), f)
-        
-        
+    
+    print('solver_net', solver_net)
+    print('Training finished')
+    
     return solver_net, stats
 
 # Modifies stats in place
@@ -354,6 +363,9 @@ def eval_net(data, X, solver_net, args, prefix, stats):
              torch.sum(torch.abs(data.eq_resid(X, Ycorr)) > 100 * eps_converge, dim=dim).detach().cpu().numpy())
     dict_agg(stats, make_prefix('raw_time'), (raw_end_time-end_time) + (base_end_time-start_time), op='sum')
     dict_agg(stats, make_prefix('raw_eval'), data.obj_fn(Ynew).detach().cpu().numpy())
+    #print('resultado do y_new para a função objetivo ', Ynew)
+    print('resultado do y_new para a função objetivo tamanho', Ynew.shape)
+    
     dict_agg(stats, make_prefix('raw_ineq_max'), torch.max(data.ineq_dist(X, Ynew), dim=dim)[0].detach().cpu().numpy())
     dict_agg(stats, make_prefix('raw_ineq_mean'), torch.mean(data.ineq_dist(X, Ynew), dim=dim).detach().cpu().numpy())
     dict_agg(stats, make_prefix('raw_ineq_num_viol_0'),
@@ -379,23 +391,25 @@ def total_loss(data, X, Y, args):
     print('inicio total_loss')
     
     dim = 0 if args['probType'] == 'nonlinear' else 1
-    #dim = 1
-    #print('X ', X[0])
-    #print('Y ', Y[0])
-    
+
+    print('tamanho de Y ', Y.shape)
+
     obj_cost = data.obj_fn(Y)
-    
-    #print('obj_fn result em total loss ', obj_cost)
-    
+        
     ineq_dist = data.ineq_dist(X, Y)    
-    #print('shape ineq dist ',ineq_dist.shape)
-    #print('>>>> ', torch.norm(ineq_dist, dim=0))
+    
     ineq_cost = torch.norm(ineq_dist, dim=dim)
     
     eq_cost = torch.norm(data.eq_resid(X, Y), dim=dim)
-    print('fim total_loss')
-    return obj_cost + args['softWeight'] * (1 - args['softWeightEqFrac']) * ineq_cost + \
+    
+    
+    result = obj_cost + args['softWeight'] * (1 - args['softWeightEqFrac']) * ineq_cost + \
             args['softWeight'] * args['softWeightEqFrac'] * eq_cost
+    print('fn_obj , ineq_cost , eq_cost, softWeight, softWeightEqFrac')
+    print('total losst size ', result.shape)
+    
+    print('fim total_loss')
+    return result
 
 def grad_steps(data, X, Y, args):
     
@@ -417,37 +431,32 @@ def grad_steps(data, X, Y, args):
             
             if partial_corr:
                 #print('ineq_partial_grad')
+                
                 Y_step = data.ineq_partial_grad(X, Y_new)
+                print('ineq_partial_grad (Y_STEP)', Y_step.shape)
             else:                
-                #print('ineq_grad & eq_grad')
-                #print(i)
-                #print('Y_new 1o valor', Y_new[0])
-                #print('Y_new shape', Y_new.shape)
                 
                 ineq_step = data.ineq_grad(X, Y_new)                
-                #print('ineq_step ', ineq_step.shape)
+                print('ineq_step ', ineq_step.shape)
                 #print('ineq_step 1o valor', ineq_step)
                 eq_step = data.eq_grad(X, Y_new)
-                #print('eq_step ', eq_step.shape)
-                #print('eq_step 1o valor', eq_step[0])
-                #print('X', X)
-                #print('Y', Y_new)
-                #print('eq_step ', eq_step)
-                #print('X ', X)
-                #print('Y ', Y_new)
-                
+                print('eq_step ', eq_step.shape)
+
+
                 #plot(X.detach().cpu().numpy(), Y_new.detach().cpu().numpy())       
-                
-                
-                
+                                
                 Y_step = (1 - args['softWeightEqFrac']) * ineq_step + args['softWeightEqFrac'] * eq_step
-                #print('Y_step 1o valor', Y_step[0])
-                #print('Y_step ', Y_step.shape)
-                #print('Y_step ', Y_step)
                 
+                print('(Y_STEP) softWeightEqFrac , softWeight , ineq_step , eq_step')
+                print('---')
+                #print('Y_step 1o valor', Y_step[0])
+            
+            
+            print('Cálculo lr * Y_Step + momentum * old_Y_step')
             new_Y_step = lr * Y_step + momentum * old_Y_step
             #print('new_Y_step 1o valor', new_Y_step[0])
             Y_new = Y_new - new_Y_step
+            print('Y NEW ')
             #print('Y_new 1o valor', Y_new[0])
             
             #plot_2(data, Y_new.detach().cpu().numpy())     
@@ -456,6 +465,7 @@ def grad_steps(data, X, Y, args):
             old_Y_step = new_Y_step            
         #print('new y ', Y_new.shape)
         print('fim grad_steps')
+        print('---')
         return Y_new
         
     else:
@@ -516,6 +526,9 @@ class NNSolver(nn.Module):
         output_dim = data.ydim - data.nknowns
         #print('Output dim: ', output_dim)
         if self._args['useCompl']:
+            print('')
+            print('')
+            print('')
             print('Using completion')
             
             layers += [nn.Linear(layer_sizes[-1], output_dim - data.neq)]
@@ -528,31 +541,36 @@ class NNSolver(nn.Module):
         for layer in layers:
             if type(layer) == nn.Linear:
                 nn.init.kaiming_normal_(layer.weight)
-        print('inicio Squential')
+        print('inicio Sequential')
         self.net = nn.Sequential(*layers)
-        print('fim Squential')
+        print('fim Sequential')
         print('###')
 
     def forward(self, x):
-        print('X ', x.shape)
-        print(x)
+        print('Inicio forward')
+
         out = self.net(x)
-        print('inicio do forward')
+        
         if self._args['useCompl']:
             if 'acopf' in self._args['probType']:
                 out = nn.Sigmoid()(out)   # used to interpolate between max and min values
-            #print('###### complete_partial')
+
+            print('OUT shape', out.shape)
             result = self._data.complete_partial(x, out)
-            print(result)
+            print('result dentro do forward useCompl')
             print('fim do forward com compl')
+            print('---')
             return result
             
         else:
-            #print('###### process_output')
-            print('OUT ', out.shape)
-            print(out)
+            print('X shape', x.shape)
+            print('OUT shape', out.shape)
+            print('X ', x[0])
+            print('OUT ', out[0])
             result = self._data.process_output(x, out)
+            print('result dentro do forward no useCompl')
             print('fim do forward sem compl')
+            print('---')
             return result
             
         

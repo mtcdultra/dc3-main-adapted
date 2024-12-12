@@ -1,10 +1,17 @@
 import numpy as np
 import matplotlib.pyplot as plt
-from mpl_toolkits.mplot3d import Axes3D
-
 
 def plot_contours(data, points=None):
-        
+    """
+    Plota a função objetivo, restrições de igualdade e desigualdade, e calcula/destaca os pontos de interseção.
+
+    Parâmetros:
+    - data: objeto com os métodos:
+        - obj_fn(X): retorna o valor da função objetivo para um array de pontos X.
+        - eq_resid(X, tol): retorna os resíduos para a restrição de igualdade.
+        - ineq_resid(X): retorna os resíduos para a restrição de desigualdade.
+    - points: lista ou array de pontos para exibir a trajetória ou os pontos relevantes no gráfico.
+    """
     x1_vals = np.linspace(-1, 4, 400)
     x2_vals = np.linspace(-1, 4, 400)
     X1, X2 = np.meshgrid(x1_vals, x2_vals)
@@ -17,6 +24,10 @@ def plot_contours(data, points=None):
     eq_values = data.eq_resid(X, 0).reshape(X1.shape)
     ineq_values = data.ineq_resid(X).reshape(X1.shape)
 
+    # Encontrar interseção entre as restrições
+    intersection_mask = (np.abs(eq_values) < 1e-2) & (ineq_values <= 0)
+    intersection_points = np.column_stack((X1[intersection_mask], X2[intersection_mask]))
+
     # Criando o gráfico
     plt.figure(figsize=(8, 6))
 
@@ -24,12 +35,16 @@ def plot_contours(data, points=None):
     cp = plt.contour(X1, X2, Z, levels=20, cmap='twilight', alpha=0.7)
 
     # Adicionando as curvas de contorno para a restrição de igualdade (eq_resid = 0)
-    eq_mask = np.abs(eq_values) < 0.05  # Tolerância para mostrar a região
     plt.contour(X1, X2, eq_values, levels=[0], colors='red', linewidths=2, label="Restrição de Igualdade")
 
     # Plotando as curvas de contorno para a restrição de desigualdade (ineq_resid <= 0)
-    ineq_mask = ineq_values <= 0
     plt.contour(X1, X2, ineq_values, levels=[0], colors='blue', linewidths=2, linestyles='dashed', label="Restrição de Desigualdade")
+
+    # Destacar os pontos de interseção
+    if intersection_points.size > 0:
+        plt.scatter(intersection_points[:, 0], intersection_points[:, 1], color='purple', label='Interseção', zorder=5)
+        for i, (x, y) in enumerate(intersection_points):
+            plt.text(x, y, f'P{i+1}', color='black', fontsize=8)
 
     # Se pontos forem fornecidos, plotá-los no gráfico
     if points is not None:
@@ -50,3 +65,6 @@ def plot_contours(data, points=None):
     plt.legend()
 
     plt.show()
+
+    # Retornar os pontos de interseção
+    return intersection_points
