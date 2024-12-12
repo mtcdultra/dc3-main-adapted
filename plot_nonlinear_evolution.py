@@ -54,9 +54,6 @@ def plot_nonlinear_evolution(data, y_new_history, point_index=0):
         trajectory_x1 = [x_init]  # Começa com o ponto inicial
         trajectory_x2 = [x_init_2]
 
-        # A seguir, iteramos apenas uma vez por ponto de evolução
-        print('$$$$$ ', len(y_new))
-        
         for i in range(len(y_new)):
             # Garantir que estamos pegando apenas 1 ponto por época
             trajectory_x1.append(y_new[i][0])  # Adiciona x1

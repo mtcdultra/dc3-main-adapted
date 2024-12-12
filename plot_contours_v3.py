@@ -2,16 +2,7 @@ import numpy as np
 import matplotlib.pyplot as plt
 
 def plot_contours(data, points=None):
-    """
-    Plota a função objetivo, restrições de igualdade e desigualdade, e calcula/destaca os pontos de interseção.
 
-    Parâmetros:
-    - data: objeto com os métodos:
-        - obj_fn(X): retorna o valor da função objetivo para um array de pontos X.
-        - eq_resid(X, tol): retorna os resíduos para a restrição de igualdade.
-        - ineq_resid(X): retorna os resíduos para a restrição de desigualdade.
-    - points: lista ou array de pontos para exibir a trajetória ou os pontos relevantes no gráfico.
-    """
     x1_vals = np.linspace(-1, 4, 400)
     x2_vals = np.linspace(-1, 4, 400)
     X1, X2 = np.meshgrid(x1_vals, x2_vals)
