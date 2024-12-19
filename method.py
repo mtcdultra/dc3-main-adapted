@@ -1,9 +1,3 @@
-#try:
-#    import waitGPU
-#    waitGPU.wait(utilization=50, memory_ratio=0.5, available_memory=5000, interval=9, nproc=1, ngpu=1)
-#except ImportError:
-#    pass
-
 import torch
 import torch.nn as nn
 import torch.optim as optim
@@ -29,22 +23,22 @@ from scipy.interpolate import griddata
 
 from plot_nonlinear import plot_nonlinear
 from plot_nonconvex import plot_nonconvex
+from plot_nonlinear_evolution import plot_nonlinear_evolution
+from plot_nonlinear_evolution_3d import plot_nonlinear_evolution_3d
 
-#from plot_scatter import plot_scatter
-#from plot_contours_non_linear import plot_contours_non_linear
-#from plot_scatter_nonconvex import plot_scatter_nonconvex
-#from plot_nonconvex import plot_nonconvex
+import warnings
 
+warnings.filterwarnings("ignore")
 
 
 DEVICE = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-    
-print(DEVICE)
+        
+print('Device: ', DEVICE)
 
 def main():
     parser = argparse.ArgumentParser(description='DC3')
     parser.add_argument('--probType', type=str, default='acopf57',
-        choices=['simple', 'nonconvex', 'acopf57', 'nonlinear'], help='problem type')
+        choices=['simple', 'nonconvex', 'acopf57', 'nonlinear', 'nonlinear_ex2'], help='problem type')
     parser.add_argument('--simpleVar', type=int, 
         help='number of decision vars for simple problem')
     parser.add_argument('--simpleIneq', type=int,
@@ -116,6 +110,8 @@ def main():
             args['nonconvexVar'], args['nonconvexIneq'], args['nonconvexEq'], args['nonconvexEx']))
     elif prob_type == 'nonlinear':
         filepath = os.path.join('datasets', 'nonlinear', "random_nonlinear_dataset_ex{}".format(args['simpleEx']))
+    elif prob_type == 'nonlinear_ex2':
+        filepath = os.path.join('datasets', 'nonlinear_ex2', "random_nonlinear_ex2_dataset_ex{}".format(args['simpleEx']))        
     elif prob_type == 'acopf57':
         filepath = os.path.join('datasets', 'acopf', 'acopf57_dataset')
     else:
@@ -132,8 +128,13 @@ def main():
                 pass
     data._device = DEVICE
 
+
+
+
     save_dir = os.path.join('results', str(data), 'method', my_hash(str(sorted(list(args.items())))),
         str(time.time()).replace('.', '-'))
+    
+    
     if not os.path.exists(save_dir):
         os.makedirs(save_dir)
     with open(os.path.join(save_dir, 'args.dict'), 'wb') as f:
@@ -141,11 +142,6 @@ def main():
     
     # Run method
     train_net(data, args, save_dir)
-    
-    
-
-
-
 
 
 def train_net(data, args, save_dir):
@@ -169,41 +165,44 @@ def train_net(data, args, save_dir):
     stats = {}
     train_losses = []
     
-    print('###')
+    #y_new_history = []
+    
+    y1_new_history = []
+    y2_new_history = []
+    
     print('###')
     print('Starting training')
+    
+    final_result = {}
     
     for i in range(nepochs):
         epoch_stats = {}
 
-        print('Epoch ', i)
-        # Get train loss
+        print('>>>> INICIO EPOCH ', i)
+
         solver_net.train()
-        
+        print('INICIO TRAIN LOADER')
         for Xtrain in train_loader:
+            print('')
             
-            print('Xtrain inicio')
-                    
+                                
             Xtrain = Xtrain[0].to(DEVICE)
-            print('Xtrain shape', Xtrain.shape)
+
             start_time = time.time()
             solver_opt.zero_grad()
-            #print('Xtrain 1o valor', Xtrain[0])
-            
+
+            print('xtrain valor 0 ', Xtrain[0])
             Yhat_train = solver_net(Xtrain)
-            print('treinou o X')
-            print('---')
-            
+            print('AFTER YHAT_TRAIN')
+            print('- - - ')
+            print('INICIO GRAD_STEPS')
             Ynew_train = grad_steps(data, Xtrain, Yhat_train, args)
-            
-            if args['probType'] == 'nonlinear':
-                pass
-            #    print('Xtrain ', Xtrain.shape)
-            #    print('Ynew_train ', Ynew_train.shape)
-                #plot(Xtrain.detach().cpu().numpy(), Ynew_train.detach().cpu().numpy())
-            
+            print('FIM GRAD_STEPS') 
+            print('- - - ')
+            print('BEFORE TOTAL LOSS')
             train_loss = total_loss(data, Xtrain, Ynew_train, args)
-            #print('TRAIN LOSS', train_loss)
+            print('AFTER TOTAL LOSS')
+            print('- - - ')
             print('BACKWARD')
             train_loss.sum().backward()
             print('STEP')
@@ -211,41 +210,58 @@ def train_net(data, args, save_dir):
             train_time = time.time() - start_time
             dict_agg(epoch_stats, 'train_loss', train_loss.detach().cpu().numpy())
             dict_agg(epoch_stats, 'train_time', train_time, op='sum')
-            print('Xtrain fim')
-            print('X train shape', Xtrain.shape)
-            print('- - - - - - - - - ')
-
+#            print('>>>>>>>  TRAIN LOADER')
+#            print('######################################')
+            print('')
+            print('')
+            print('')
+        print('>>>> FIM TRAIN LOADER')
+        print('')
+        
+        
         # Get valid loss
         solver_net.eval()
+        print('INICIO VALID LOADER')
         for Xvalid in valid_loader:
-            #print('Xvalid inicio')
             Xvalid = Xvalid[0].to(DEVICE)
             eval_net(data, Xvalid, solver_net, args, 'valid', epoch_stats)
-            #print('Xvalid fim')
-            #print('- - - - - - - - - ')
-        # Get test loss
+        print('FIM VALID LOADER')
+        print('')
+
         solver_net.eval()
+        print('INICIO TEST LOADER')
         for Xtest in test_loader:
-            #print('Xtest inicio')
             Xtest = Xtest[0].to(DEVICE)
             eval_net(data, Xtest, solver_net, args, 'test', epoch_stats)
-            #print('Xtest fim')
-            #print('- - - - - - - - - ')
+        print('FIM TEST LOADER')
+        print('')
 
           
         # Média da loss durante a época
         avg_train_loss = np.mean(epoch_stats['train_loss'])
         train_losses.append(avg_train_loss)
-        
-        
-        
                 
         print(
-            'Epoch {}: train loss {:.4f}, eval {:.4f}, dist {:.4f}, ineq max {:.4f}, ineq mean {:.4f}, ineq num viol {:.4f}, eq max {:.4f}, steps {}, time {:.4f}'.format(
+            'Epoch {}: train loss {:.4f}, eval {:.4f}, dist {:.4f}, ineq max {:.4f}, ineq mean {:.4f}, ineq num viol {:.4f}, eq max {:.4f}, steps {}, time {:.4f}, y_new_train[0] {:.4f}, y_new_train[1] {:.4f}'.format(
                 i, np.mean(epoch_stats['train_loss']), np.mean(epoch_stats['valid_eval']),
                 np.mean(epoch_stats['valid_dist']), np.mean(epoch_stats['valid_ineq_max']),
                 np.mean(epoch_stats['valid_ineq_mean']), np.mean(epoch_stats['valid_ineq_num_viol_0']),
-                np.mean(epoch_stats['valid_eq_max']), np.mean(epoch_stats['valid_steps']), np.mean(epoch_stats['valid_time'])))
+                np.mean(epoch_stats['valid_eq_max']), np.mean(epoch_stats['valid_steps']), np.mean(epoch_stats['valid_time']),
+                np.mean(Ynew_train[0].cpu().detach().numpy()), np.mean(Ynew_train[1].cpu().detach().numpy())
+            )
+        )
+
+        #print('y1 new ', np.mean(Ynew_train[0].cpu().detach().numpy#()))
+        #print('y2 new ', np.mean(Ynew_train[1].cpu().detach().numpy()))
+        
+        #y_new_history.append(Ynew_train.cpu().detach().numpy())
+        
+        
+        y1_new_history.append(np.mean(Ynew_train[0].cpu().detach().numpy()))
+        y2_new_history.append(np.mean(Ynew_train[1].cpu().detach().numpy()))
+
+
+
 
         if args['saveAllStats']:
             if i == 0:
@@ -263,6 +279,16 @@ def train_net(data, args, save_dir):
             with open(os.path.join(save_dir, 'solver_net.dict'), 'wb') as f:
                 torch.save(solver_net.state_dict(), f)
                 
+    print('>>>> FIM EPOCH ', i)
+    print('###')
+    print('###')
+    print('')
+    print('')
+    print('')
+    print('')
+    
+    
+    #print('Y NEW HISTORY ', y_new_history)
             
     plt.figure(figsize=(10, 6))
     plt.plot(train_losses, label='Train Loss')
@@ -271,34 +297,30 @@ def train_net(data, args, save_dir):
     plt.title('Train Loss Over Epochs')
     plt.legend()
     plt.grid(True)
-    plt.savefig('train_loss.png')
+    #plt.savefig('train_loss.png')
     plt.show() 
 
+    print('###')
 
-    if args['probType'] == 'nonlinear':
+    if args['probType'] == 'nonlinear' or args['probType'] == 'nonlinear_ex2':
 
-        plot_nonlinear(data)
+        
+
+        plot_nonlinear(data, Ynew_train.cpu().detach().numpy())
+
+        y_new_history = list(zip(y1_new_history, y2_new_history))
+
+        plot_nonlinear_evolution(data, y1_new_history, y2_new_history)
+
+        # Exemplo de uso
+        #indices = [0, 2, 10]  # Índices dos pontos que você deseja plotar (por exemplo, [0] para data.trainX[0] e [2] para data.trainX[2])
+        # plot_multiple_points(data, y_new_history, indices)
         
     if args['probType'] == 'nonconvex':
 
         plot_nonconvex(data.trainX.detach().cpu().numpy(), Ynew_train.detach().cpu().numpy())
 
-
-
-
-    #plot_non_linear(data.trainX.detach().cpu().numpy(), Ynew_train.detach().cpu().numpy())
-
-
-#    if 'nonlinear' in args['probType']:
-        #plt.figure(figsize=(10, 6))
-#        plot_contours_1(data)
-        #plot_contours_2(data)
-        #plot_contours_3(data, points=np.array(trajectory))
-    #else:
-    #    data.plot_obj_fn()
-    
-    
-    #print('Y ', Ynew_train)
+        pass
     
     with open(os.path.join(save_dir, 'stats.dict'), 'wb') as f:
         pickle.dump(stats, f)
@@ -307,6 +329,7 @@ def train_net(data, args, save_dir):
     
     print('solver_net', solver_net)
     print('Training finished')
+    
     
     return solver_net, stats
 
@@ -337,8 +360,11 @@ def eval_net(data, X, solver_net, args, prefix, stats):
     Ynew = grad_steps(data, X, Y, args)
     raw_end_time = time.time()
 
-    dim = 0 if args['probType'] == 'nonlinear' else 1
-
+    dim = 0 if args['probType'] == 'nonlinear' or args['probType'] == 'nonlinear_ex2' else 1
+    
+    #dict_agg(stats, make_prefix('y'), Ycorr.detach().cpu().numpy())
+    
+    
     dict_agg(stats, make_prefix('time'), end_time - start_time, op='sum')
     dict_agg(stats, make_prefix('steps'), np.array([steps]))
     dict_agg(stats, make_prefix('loss'), total_loss(data, X, Ynew, args).detach().cpu().numpy())
@@ -363,8 +389,6 @@ def eval_net(data, X, solver_net, args, prefix, stats):
              torch.sum(torch.abs(data.eq_resid(X, Ycorr)) > 100 * eps_converge, dim=dim).detach().cpu().numpy())
     dict_agg(stats, make_prefix('raw_time'), (raw_end_time-end_time) + (base_end_time-start_time), op='sum')
     dict_agg(stats, make_prefix('raw_eval'), data.obj_fn(Ynew).detach().cpu().numpy())
-    #print('resultado do y_new para a função objetivo ', Ynew)
-    print('resultado do y_new para a função objetivo tamanho', Ynew.shape)
     
     dict_agg(stats, make_prefix('raw_ineq_max'), torch.max(data.ineq_dist(X, Ynew), dim=dim)[0].detach().cpu().numpy())
     dict_agg(stats, make_prefix('raw_ineq_mean'), torch.mean(data.ineq_dist(X, Ynew), dim=dim).detach().cpu().numpy())
@@ -384,30 +408,33 @@ def eval_net(data, X, solver_net, args, prefix, stats):
              torch.sum(torch.abs(data.eq_resid(X, Ynew)) > 10 * eps_converge, dim=dim).detach().cpu().numpy())
     dict_agg(stats, make_prefix('raw_eq_num_viol_2'),
              torch.sum(torch.abs(data.eq_resid(X, Ynew)) > 100 * eps_converge, dim=dim).detach().cpu().numpy())
+    
+    
+    
     return stats
 
 def total_loss(data, X, Y, args):
     
-    print('inicio total_loss')
     
-    dim = 0 if args['probType'] == 'nonlinear' else 1
-
-    print('tamanho de Y ', Y.shape)
+    dim = 0 if args['probType'] == 'nonlinear' or args['probType'] == 'nonlinear_ex2' else 1
 
     obj_cost = data.obj_fn(Y)
-        
-    ineq_dist = data.ineq_dist(X, Y)    
+      
+    #print('obj_cost dentro de total_loss: ', obj_cost)  
+    ineq_dist = data.ineq_dist(Y, Y)
     
-    ineq_cost = torch.norm(ineq_dist, dim=dim)
+    ineq_cost = torch.norm(ineq_dist, dim=1)
+    #print('ineq_cost dentro de total_loss: ', ineq_cost)
+    #print('$$$$ ',data.eq_resid(X, Y).unsqueeze(1))
     
-    eq_cost = torch.norm(data.eq_resid(X, Y), dim=dim)
+    # original
+    # eq_cost = torch.norm(data.eq_resid(X, Y), dim=1)
     
-    
-    result = obj_cost + args['softWeight'] * (1 - args['softWeightEqFrac']) * ineq_cost + \
-            args['softWeight'] * args['softWeightEqFrac'] * eq_cost
-    print('fn_obj , ineq_cost , eq_cost, softWeight, softWeightEqFrac')
-    print('total losst size ', result.shape)
-    
+    eq_cost = torch.norm(data.eq_resid(X, Y).unsqueeze(1), dim=1)
+    #print('eq_cost dentro de total_loss: ', eq_cost)
+    result = obj_cost + args['softWeight'] * (1 - args['softWeightEqFrac']) * ineq_cost + args['softWeight'] * args['softWeightEqFrac'] * eq_cost
+
+    #print('Total loss ', result[0])
     print('fim total_loss')
     return result
 
@@ -425,47 +452,31 @@ def grad_steps(data, X, Y, args):
             assert False, "Partial correction not available without completion."
         Y_new = Y
         old_Y_step = 0        
-        print('inicio grad_steps')
         print('NUM STEPS ', num_steps)
-        for i in range(num_steps):
-            
+        print('PARTIAL VAR ', partial_var)
+        for i in range(num_steps):            
             if partial_corr:
-                #print('ineq_partial_grad')
-                
                 Y_step = data.ineq_partial_grad(X, Y_new)
-                print('ineq_partial_grad (Y_STEP)', Y_step.shape)
+                #Y_step = data.ineq_partial_grad(X, Y_new)
+                #print('ineq_partial_grad (Y_STEP)')
             else:                
-                
                 ineq_step = data.ineq_grad(X, Y_new)                
-                print('ineq_step ', ineq_step.shape)
-                #print('ineq_step 1o valor', ineq_step)
                 eq_step = data.eq_grad(X, Y_new)
-                print('eq_step ', eq_step.shape)
-
-
-                #plot(X.detach().cpu().numpy(), Y_new.detach().cpu().numpy())       
                                 
                 Y_step = (1 - args['softWeightEqFrac']) * ineq_step + args['softWeightEqFrac'] * eq_step
                 
-                print('(Y_STEP) softWeightEqFrac , softWeight , ineq_step , eq_step')
+                #print('(Y_STEP) softWeightEqFrac , softWeight , ineq_step , eq_step')
                 print('---')
-                #print('Y_step 1o valor', Y_step[0])
             
-            
-            print('Cálculo lr * Y_Step + momentum * old_Y_step')
+            #print('Cálculo lr * Y_Step + momentum * old_Y_step')
             new_Y_step = lr * Y_step + momentum * old_Y_step
             #print('new_Y_step 1o valor', new_Y_step[0])
             Y_new = Y_new - new_Y_step
-            print('Y NEW ')
-            #print('Y_new 1o valor', Y_new[0])
-            
-            #plot_2(data, Y_new.detach().cpu().numpy())     
-            #print('####')
+            #print(f'NEW Y STEP ({i}) - {new_Y_step[0]}')
+            #print(f'Y NEW ({i}) - {Y_new[0]}')
 
             old_Y_step = new_Y_step            
-        #print('new y ', Y_new.shape)
-        print('fim grad_steps')
-        print('---')
+
         return Y_new
         
     else:
@@ -523,12 +534,11 @@ class NNSolver(nn.Module):
             [[nn.Linear(a,b), nn.BatchNorm1d(b), nn.ReLU(), nn.Dropout(p=0.2)]
                 for a,b in zip(layer_sizes[0:-1], layer_sizes[1:])])
         
-        output_dim = data.ydim - data.nknowns
-        #print('Output dim: ', output_dim)
+        output_dim = data.ydim - data.nknowns        
+
+        print('')
+        
         if self._args['useCompl']:
-            print('')
-            print('')
-            print('')
             print('Using completion')
             
             layers += [nn.Linear(layer_sizes[-1], output_dim - data.neq)]
@@ -541,37 +551,37 @@ class NNSolver(nn.Module):
         for layer in layers:
             if type(layer) == nn.Linear:
                 nn.init.kaiming_normal_(layer.weight)
-        print('inicio Sequential')
         self.net = nn.Sequential(*layers)
-        print('fim Sequential')
         print('###')
 
     def forward(self, x):
-        print('Inicio forward')
-
+        print('')
+        print('|-- Inicio forward')
+        #print('| X shape', x.shape)
         out = self.net(x)
         
         if self._args['useCompl']:
             if 'acopf' in self._args['probType']:
                 out = nn.Sigmoid()(out)   # used to interpolate between max and min values
 
-            print('OUT shape', out.shape)
+            #print('OUT shape', out.shape)
             result = self._data.complete_partial(x, out)
-            print('result dentro do forward useCompl')
+            print('result 0 após complete_partial (yhat)', result[0])
             print('fim do forward com compl')
             print('---')
             return result
             
         else:
-            print('X shape', x.shape)
-            print('OUT shape', out.shape)
-            print('X ', x[0])
-            print('OUT ', out[0])
-            result = self._data.process_output(x, out)
-            print('result dentro do forward no useCompl')
-            print('fim do forward sem compl')
-            print('---')
+            
+            #print('| OUT shape', out.shape)
+            #print('| OUT index 0', out[0])
+            result = self._data.process_output(x, out)            
+            print('result 0 após process_output (yhat)', result[0])
+            print('| fim do forward sem compl')
+            print('|---')
+            print('')
             return result
+        
             
         
 

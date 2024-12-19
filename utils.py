@@ -50,8 +50,240 @@ class Problem_Non_Linear:
         self._nknowns = 0
         self._valid_frac = valid_frac
         self._test_frac = test_frac
-
+        self._neq = 1
+        self._nineq = 1
         self._device = None
+        
+        self.partial_vars = 0
+        self.other_vars = 1
+
+        
+    @property
+    def device(self):
+        return self._device
+
+    @property
+    def X(self):
+        return self._X
+
+    @property
+    def xdim(self):
+        return self._xdim
+
+    @property
+    def ydim(self):
+        return self._ydim
+
+    @property
+    def num(self):
+        return self._num
+
+    @property
+    def nknowns(self):
+        return self._nknowns
+    
+    @property
+    def neq(self):
+        return self._neq
+    
+    @property
+    def nineq(self):
+        return self._nineq
+
+    @property
+    def valid_frac(self):
+        return self._valid_frac
+
+    @property
+    def test_frac(self):
+        return self._test_frac
+
+    @property
+    def train_frac(self):
+        return 1 - self.valid_frac - self.test_frac
+
+    @property
+    def trainX(self):
+        return self.X[: int(self.train_frac * self.num)]
+
+    @property
+    def validX(self):
+        return self.X[
+            int(self.train_frac * self.num) : int(
+                (self.num * (self.train_frac + self.valid_frac))
+            )
+        ]
+
+    @property
+    def testX(self):
+        return self.X[int(self.num * (self.train_frac + self.valid_frac)) :]
+
+
+    def __str__(self):
+        return 'Problem_Non_Linear-{}-{}-{}-{}'.format(
+            str(self.ydim), str(self.nineq), str(self.neq), str(self.num)
+        )
+        
+    def obj_fn(self, x):
+        
+        x1 = x[:, 0]
+        x2 = x[:, 1]
+
+        return x1 * ((x1 - x2) ** 2 + (x1 - 2)) + 5
+ 
+    def eq_resid(self, x, y):
+
+        x1 = x[:, 0]
+        x2 = x[:, 1]
+        
+        
+
+        return x1**2 / 2 + 1.5 * x2**2 - 1.2
+
+    def ineq_resid(self, x):
+
+        x1 = x[:, 0]
+        x2 = x[:, 1]
+                
+        return 0.75 * x1**2 + 0.25 * x2**2 - 0.5
+
+    def ineq_dist(self, x, y):
+        """
+        Clampe os resíduos de desigualdade.
+        """
+        resids = self.ineq_resid(x)
+
+        #print('resultado ineq_resid (resids)', resids)
+        #print('***')
+        #print(resids.unsqueeze(1))
+        #print('***')
+        #print('antes de mandar para total_loss: ', torch.clamp(resids, 0))
+        #print('***')
+        
+        resids = resids.unsqueeze(1)
+        
+        return torch.clamp(resids, 0)
+
+    def eq_grad(self, x, y):
+        """
+        Gradiente do resíduo de igualdade.
+        Derivadas parciais:
+        """        
+        y1 = y[:, 0].unsqueeze(1)
+        y2 = y[:, 1].unsqueeze(1)
+        
+        x1 = x[:, 0].unsqueeze(1)
+        x2 = x[:, 1].unsqueeze(1)
+        
+        grad_x1 = x1 * y1
+        grad_x2 = (3 * x2) * y2
+        
+        grad = torch.cat((grad_x1, grad_x2), dim=1)
+        
+        return grad
+
+    def ineq_grad(self, x, y):
+        """
+        Gradiente do resíduo de desigualdade.
+        Derivadas parciais:
+        """
+        x1 = x[:, 0]
+        x2 = x[:, 1]
+            
+        # Calcula a distância clamped
+        dist = self.ineq_dist(x, y)  # Tamanho esperado: [25]
+
+        grad_x1 = (1.5 * x1)
+        grad_x2 = (0.5 * x2)
+        
+        y1 = y[:, 0].unsqueeze(1)
+        y2 = y[:, 1].unsqueeze(1)
+
+        grad_x1 = y1 * grad_x1.unsqueeze(1)
+        grad_x2 = y2 * grad_x2.unsqueeze(1)
+
+        grad_x1_scaled = grad_x1 * dist
+        grad_x2_scaled = grad_x2 * dist
+        
+        grad = torch.cat((grad_x1_scaled, grad_x2_scaled), dim=1)
+        
+        grad = torch.clamp(grad, 0)
+
+        return grad
+        
+    
+    def ineq_partial_grad_old(self, X, Y):
+        # Resíduo ajustado (clamp para respeitar desigualdades)
+        x1 = X[:, 0]
+        x2 = X[:, 1]
+        grad = self.ineq_dist(X, Y).squeeze(1)
+        #grad = self.ineq_dist(x1, x2)
+
+        # Inicialização do tensor para gradientes
+        Y = torch.zeros(X.shape[0], X.shape[1], device=self.device)
+        
+        Y[:, 0] = grad * 1.5 * x1# Gradiente para x1
+        Y[:, 1] = grad * 0.5 * x2# Gradiente para x2
+
+        # Retornar gradientes ajustados
+        return Y
+
+    def ineq_partial_grad(self, X, Y):
+        # Assumindo que as duas variáveis são "parciais"
+        grad_x1 = 1.5 * X[:, 0]  # Derivada em relação a x1
+        grad_x2 = 0.5 * X[:, 1]  # Derivada em relação a x2
+        
+        grad = torch.stack([grad_x1, grad_x2], dim=1)
+        
+        # A parte efetiva do gradiente pode ser calculada diretamente
+        grad_effective = 2 * torch.clamp(Y - 0.5, 0)  # Ajuste para garantir valores não negativos
+        
+        # Atualizando Y com base no gradiente
+        Y = torch.zeros(X.shape[0], X.shape[1], device=self.device)
+        Y[:, 0] = grad_effective[:, 0]  # Atualiza para x1
+        Y[:, 1] = grad_effective[:, 1]  # Atualiza para x2
+
+        return Y
+
+    def process_output(self, X, Y):
+        return Y
+    
+    
+    def complete_partial(self, X, Z):
+
+        Y = torch.zeros(X.shape[0], self.ydim, device=self.device)
+        
+        Y[:, self.partial_vars] = Z.squeeze(1)  
+        for i in range(Y.shape[0]):  
+            z = Z[i, 0]  
+            term = 1.2 - (z**2 / 2)  
+            x2 = torch.sqrt(torch.clamp((2 / 3) * term, min=0))  # Clamp para evitar valores inválidos
+            
+            Y[i, self.other_vars] = x2  
+        
+        return Y
+
+###################################################################
+
+# PROBLEM NON LINEAR - Example 2
+
+###################################################################
+
+class Problem_Non_Linear_ex2:
+    def __init__(self, X, valid_frac=0.0833, test_frac=0.0833):
+        self._X = torch.tensor(X)
+        self._xdim = X.shape[1]
+        self._ydim = 2
+        self._num = X.shape[0]
+        self._nknowns = 0
+        self._valid_frac = valid_frac
+        self._test_frac = test_frac
+        self._neq = 1
+        self._ineq = 2
+        self._device = None
+
+        self.partial_vars = 0
+        self.other_vars = 1
 
     @property
     def device(self):
@@ -76,6 +308,14 @@ class Problem_Non_Linear:
     @property
     def nknowns(self):
         return self._nknowns
+
+    @property
+    def neq(self):
+        return self._neq
+
+    @property
+    def ineq(self):
+        return self._ineq
 
     @property
     def valid_frac(self):
@@ -106,144 +346,95 @@ class Problem_Non_Linear:
         return self.X[int(self.num * (self.train_frac + self.valid_frac)) :]
 
     def obj_fn(self, x):
-        
         x1 = x[:, 0]
         x2 = x[:, 1]
-
-        return x1 * ((x1 - x2) ** 2 + (x1 - 2)) + 5
+        return (x1 - 3) * (x2 - 2) + (x2 - 2) ** 2
 
     def eq_resid(self, x, y):
-
         x1 = x[:, 0]
         x2 = x[:, 1]
-
-        return x1**2 / 2 + 1.5 * x2**2 - 1.2
+        return 2 * x1 + x2 - 6
 
     def ineq_resid(self, x):
-
         x1 = x[:, 0]
         x2 = x[:, 1]
-        
-        return 0.75 * x1**2 + 0.25 * x2**2 - 0.5
+        ineq1 = x1 + x2 - 7
+        ineq2 = -x1 + 0.15 * x2**2 - 3
+        return torch.stack([ineq1, ineq2], dim=1)
 
     def ineq_dist(self, x, y):
         """
         Clampe os resíduos de desigualdade.
         """
-        #x1 = x[:, 0]
-        #x2 = x[:, 1]
-        
         resids = self.ineq_resid(x)
-        
-        resids = resids.unsqueeze(1)
-        
         return torch.clamp(resids, 0)
 
     def eq_grad(self, x, y):
         """
         Gradiente do resíduo de igualdade.
-        Derivadas parciais:
-        """        
-        
-        #print('Y ', y)
-
-        y1 = y[:, 0].unsqueeze(1)
-        y2 = y[:, 1].unsqueeze(1)
-
-        
+        """
         x1 = x[:, 0].unsqueeze(1)
         x2 = x[:, 1].unsqueeze(1)
-        
-#        y = y.reshape(-1)
-        
-        grad_x1 = x1 * y1
-        grad_x2 = (3 * x2) * y2
-        
-        
+
+        grad_x1 = torch.full_like(x1, 2)  # Derivada parcial de 2*x1
+        grad_x2 = torch.full_like(x2, 1)  # Derivada parcial de x2
+
         grad = torch.cat((grad_x1, grad_x2), dim=1)
-        
         return grad
 
     def ineq_grad(self, x, y):
         """
         Gradiente do resíduo de desigualdade.
-        Derivadas parciais:
         """
-        x1 = x[:, 0]
-        x2 = x[:, 1]
-                
-        # Calcula a distância clamped
-        dist = self.ineq_dist(x, y)  # Tamanho esperado: [25]
+        x1 = x[:, 0].unsqueeze(1)
+        x2 = x[:, 1].unsqueeze(1)
 
-        grad_x1 = (1.5 * x1)
-        grad_x2 = (0.5 * x2)
+        # Gradientes das duas restrições
+        grad_ineq1_x1 = torch.ones_like(x1)  # Derivada parcial de x1 + x2
+        grad_ineq1_x2 = torch.ones_like(x2)
 
-        y1 = y[:, 0].unsqueeze(1)
-        y2 = y[:, 1].unsqueeze(1)
+        grad_ineq2_x1 = torch.full_like(x1, -1)  # Derivada parcial de -x1
+        grad_ineq2_x2 = 0.3 * x2  # Derivada parcial de 0.15 * x2^2
 
-        grad_x1 = y1 * grad_x1.unsqueeze(1)
-        grad_x2 = y2 * grad_x2.unsqueeze(1)
+        # Combinar os gradientes
+        grad_x1 = torch.cat((grad_ineq1_x1, grad_ineq2_x1), dim=1)
+        grad_x2 = torch.cat((grad_ineq1_x2, grad_ineq2_x2), dim=1)
 
+        return torch.cat((grad_x1, grad_x2), dim=1)
 
-        grad_x1_scaled = grad_x1 * dist
-        grad_x2_scaled = grad_x2 * dist
-        
-        
-        grad = torch.cat((grad_x1_scaled, grad_x2_scaled), dim=1)
-                
-        return grad
-        
-    
-    def ineq_partial_grad(self, X):
-        # Resíduo ajustado (clamp para respeitar desigualdades)
+    def ineq_partial_grad(self, X, Y):
+        """
+        Gradiente parcial para desigualdades.
+        """
+        resids = self.ineq_dist(X, Y)
+        grad = torch.zeros_like(X)
         x1 = X[:, 0]
         x2 = X[:, 1]
-        grad = self.ineq_dist(x1, x2)
 
-        # Inicialização do tensor para gradientes
-        Y = torch.zeros(X.shape[0], X.shape[1], device=self.device)
+        # Aplicar gradientes às desigualdades
+        grad[:, 0] = resids[:, 0] + resids[:, 1] * -1  # Combinação para x1
+        grad[:, 1] = resids[:, 0] * 1 + resids[:, 1] * (0.3 * x2)
 
-        # Aplicar gradientes às variáveis parciais
-        Y[:, 0] = grad * 1.5 * x1  # Gradiente para x1
-        Y[:, 1] = grad * 0.5 * x2  # Gradiente para x2
+        return grad
 
-        # Retornar gradientes ajustados
+    def process_output(self, X, Y):
         return Y
-    
-    
-    def process_output(self, x, z):
-        """
-        Processa a saída intermediária.
-        """
-        # x1 = x[:, 0]
-        # x2 = x[:, 1]
-
-        return z
 
     def complete_partial(self, X, Z):
         """
-        Solução para o conjunto completo de variáveis, adaptada para a estrutura atual de variáveis parciais e outras variáveis.
+        Completar variáveis faltantes.
         """
-        # Inicializa o tensor de saída Y com zeros
-        Y = torch.zeros(X.shape[0], X.shape[1], device=self.device)
-        
-        # Atribui Z às variáveis parciais em Y
-        Y[:, self.partial_vars] = Z
-        
-        # Calcula as variáveis restantes com base na solução do sistema de equações
-        Y[:, self.other_vars] = (X - Z @ self._A_partial.T) @ self._A_other_inv.T
-        
-        # Adaptação para considerar o gradiente de desigualdade, se necessário.
-        # Calcula o gradiente para as variáveis de desigualdade ajustadas, se aplicável
-        ineq_grad = self.ineq_partial_grad(X)
-        
-        # Atualiza Y com base nos gradientes de desigualdade, se essa funcionalidade for relevante.
-        # Esta parte pode ser modificada dependendo da necessidade de aplicar gradientes adicionais.
-        Y[:, self.partial_vars] += ineq_grad[:, self.partial_vars]  # Atualiza variáveis parciais com o gradiente
-        
-        # Retorna o vetor de solução completo Y
-        return Y
+        Y = torch.zeros(X.shape[0], self.ydim, device=self.device)
 
+        Y[:, self.partial_vars] = Z.squeeze(1)
+        for i in range(Y.shape[0]):
+            z = Z[i, 0]
+            term = 6 - 2 * z
+            x2 = term
+            Y[i, self.other_vars] = x2
+
+        return Y
+    
 ###################################################################
 # SIMPLE PROBLEM
 ###################################################################
@@ -424,7 +615,7 @@ class SimpleProblem:
         return self._device
 
     def obj_fn(self, Y):
-        print('entrou funcao objetivo')
+        #print('entrou funcao objetivo')
         return (0.5*(Y@self.Q)*Y + self.p*Y).sum(dim=1)
 
     def eq_resid(self, X, Y):
@@ -457,20 +648,18 @@ class SimpleProblem:
 
     # Processes intermediate neural network output
     def process_output(self, X, Y):
-        #print('PROCESS OUTPUT')
         return Y
 
     # Solves for the full set of variables
     def complete_partial(self, X, Z):
-        #print('COMPLETE PARTIAL')
+
         Y = torch.zeros(X.shape[0], self.ydim, device=self.device)
-        print('Y antes', Y.shape)
+        
         Y[:, self.partial_vars] = Z
         
-        print('Y partial vars', Y.shape)
+
         Y[:, self.other_vars] = (X - Z @ self._A_partial.T) @ self._A_other_inv.T
-        print('Y other vars', Y.shape)
-        print('COMPLETE PARTIAL')
+
         return Y
 
     def opt_solve(self, X, solver_type='osqp', tol=1e-4):

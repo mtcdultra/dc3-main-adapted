@@ -29,6 +29,9 @@ def get_experiment_dirs(path_prefix):
     exper_dirs['nonconvex'] = 'NonconvexProblem-100-50-50-10000'
 
     exper_dirs['acopf'] = 'ACOPF-57-0-0.5-0.7-0.0833-0.0833'
+    
+    
+    exper_dirs['nonlinear'] = 'random_nonlinear_dataset_ex30'
 
     for key in exper_dirs.keys():
         exper_dirs[key] = os.path.join(path_prefix, exper_dirs[key])

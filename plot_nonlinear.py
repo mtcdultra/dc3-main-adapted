@@ -1,14 +1,14 @@
 import matplotlib.pyplot as plt
 import numpy as np
-import pandas as pd
+import torch
 
 def plot_nonlinear(data, y_new):
     fig, ax = plt.subplots(figsize=(6, 6))
 
     # Linhas para criar o grid de contornos
-    x1 = np.linspace(-2, 4, 400)
-    x2 = np.linspace(-2, 4, 400)
-    
+    x1 = np.linspace(-1, 4, 300)
+    x2 = np.linspace(-1, 4, 300)
+
     # x1_ e x2_ serão os pontos resultantes do treinamento do modelo (y_new)
     x1_ = y_new[:, 0]  # Assumindo que y_new seja uma matriz com duas colunas
     x2_ = y_new[:, 1]
@@ -26,8 +26,19 @@ def plot_nonlinear(data, y_new):
     eq_resid_vals = eq_resid_vals.reshape(x1_vec.shape)  # Reshape para 2D
 
     # Calculando os resíduos de desigualdade (passando X_vec)
-    ineq_resid_vals = data.ineq_resid(X_vec)    
-    ineq_resid_vals = ineq_resid_vals.reshape(x1_vec.shape)  # Reshape para 2D
+    ineq_resid_vals = data.ineq_resid(X_vec)
+    
+    # Verificando a forma de ineq_resid_vals
+    print("Shape of ineq_resid_vals:", ineq_resid_vals.shape)  # Verificando a forma
+    
+    # Caso ineq_resid_vals seja 1D (uma única desigualdade)
+    if ineq_resid_vals.ndim == 1:
+        ineq_resid_vals1 = ineq_resid_vals.reshape(x1_vec.shape)  # Primeira desigualdade
+        ineq_resid_vals2 = ineq_resid_vals1  # Caso não haja segunda desigualdade, pode ser a mesma
+    else:
+        # Caso ineq_resid_vals seja 2D (duas desigualdades)
+        ineq_resid_vals1 = ineq_resid_vals[:, 0].reshape(x1_vec.shape)  # Primeira desigualdade
+        ineq_resid_vals2 = ineq_resid_vals[:, 1].reshape(x1_vec.shape)  # Segunda desigualdade
 
     # Plotando o contorno da função objetivo
     cp = ax.contour(
@@ -37,10 +48,10 @@ def plot_nonlinear(data, y_new):
 
     # Contornos para os resíduos de equações (vermelho) e desigualdades (azul)
     cg1 = ax.contour(x1_vec, x2_vec, eq_resid_vals, levels=[0], colors="red", linewidths=2)
-    cg2 = ax.contour(x1_vec, x2_vec, ineq_resid_vals, levels=[0], colors="blue", linewidths=2)
+    cg2_ineq1 = ax.contour(x1_vec, x2_vec, ineq_resid_vals1, levels=[0], colors="blue", linewidths=2)
+    cg2_ineq2 = ax.contour(x1_vec, x2_vec, ineq_resid_vals2, levels=[0], colors="green", linewidths=2)
 
     # Plotando os pontos de y_new sobre os contornos
-    # Colorindo os pontos com base nos valores da função objetivo
     scatter = ax.scatter(x1_, x2_, c=data.obj_fn(y_new), cmap='viridis', edgecolors='black', label='Pontos')
 
     # Adicionando barra de cores

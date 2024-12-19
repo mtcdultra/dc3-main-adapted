@@ -1,92 +1,84 @@
 import matplotlib.pyplot as plt
 import numpy as np
-import pandas as pd
 
-def plot_nonlinear_evolution(data, y_new_history, point_index=0):
+def plot_nonlinear_evolution(data, y1_new_history, y2_new_history):
+    
     fig, ax = plt.subplots(figsize=(6, 6))
 
-    # Linhas para criar o grid de contornos
+    # Empacotando as coordenadas em uma única matriz
+    y_new_history = np.column_stack([y1_new_history, y2_new_history])
+    
+    print('Y NEW ', y_new_history)
+    print('Y NEW SHAPE', y_new_history.shape)
+
+    # Definindo a grade de pontos para o gráfico de contorno
     x1 = np.linspace(-2, 4, 400)
     x2 = np.linspace(-2, 4, 400)
 
-    # Criando uma grade de valores de x1 e x2
     x1_vec, x2_vec = np.meshgrid(x1, x2)
-
-    # Calculando a função objetivo (passando x1_vec e x2_vec empacotados em X)
     X_vec = np.column_stack([x1_vec.ravel(), x2_vec.ravel()])
-    z = data.obj_fn(X_vec)
-    z = z.reshape(x1_vec.shape)  # Reshape para manter as dimensões 2D
+    z = data.obj_fn(X_vec)  # Função objetivo
+    z = z.reshape(x1_vec.shape)
 
-    # Calculando os resíduos das equações (passando X_vec)
+    # Calculando as restrições de equações e desigualdades
     eq_resid_vals = data.eq_resid(X_vec, 0)
-    eq_resid_vals = eq_resid_vals.reshape(x1_vec.shape)  # Reshape para 2D
+    eq_resid_vals = eq_resid_vals.reshape(x1_vec.shape)
 
-    # Calculando os resíduos de desigualdade (passando X_vec)
-    ineq_resid_vals = data.ineq_resid(X_vec)    
-    ineq_resid_vals = ineq_resid_vals.reshape(x1_vec.shape)  # Reshape para 2D
+    ineq_resid_vals = data.ineq_resid(X_vec)
+    ineq_resid_vals = ineq_resid_vals.reshape(x1_vec.shape)
 
-    # Plotando o contorno da função objetivo
-    cp = ax.contour(
-        x1_vec, x2_vec, z, levels=np.linspace(-5, 200, 300), cmap="viridis"
-    )
+    # Gerando os contornos da função objetivo, equações e desigualdades
+    cp = ax.contour(x1_vec, x2_vec, z, levels=np.linspace(-5, 200, 300), cmap="viridis")
     ax.clabel(cp, fmt="%2.2f", inline=True)
 
-    # Contornos para os resíduos de equações (vermelho) e desigualdades (azul)
     cg1 = ax.contour(x1_vec, x2_vec, eq_resid_vals, levels=[0], colors="red", linewidths=2)
     cg2 = ax.contour(x1_vec, x2_vec, ineq_resid_vals, levels=[0], colors="blue", linewidths=2)
 
-    # Ponto inicial (exemplo: primeiro ponto de treinamento)
-    x_init = data.trainX[0, 0]  # Pega o valor de x1 no ponto inicial
-    x_init_2 = data.trainX[0, 1]  # Pega o valor de x2 no ponto inicial
+    # Trajetória geral
+    trajectory_x1 = []
+    trajectory_x2 = []
 
-    # Plotando o ponto inicial em verde
-    ax.scatter(x_init, x_init_2, color='green', label='Ponto Inicial')
+    # Plotando as trajetórias para todos os pontos em y1_new_history e y2_new_history
+    for i in range(len(y1_new_history)):
+        y1_new = y1_new_history[i]
+        y2_new = y2_new_history[i]
 
-    # Inicializando 'scatter' para garantir que sempre tenha um valor antes de usar
-    scatter = None
+        trajectory_x1.append(y1_new)  # Primeiro valor de y_new (y1_new)
+        trajectory_x2.append(y2_new)  # Segundo valor de y_new (y2_new)
 
-    # Verifica se o ponto index está dentro do intervalo de y_new_history
-    
-    if point_index < len(y_new_history):
-        y_new = y_new_history[point_index]
-        
-        # Inicializa uma lista para armazenar a trajetória de pontos
-        trajectory_x1 = [x_init]  # Começa com o ponto inicial
-        trajectory_x2 = [x_init_2]
+    # Plotando a trajetória completa
+    ax.plot(trajectory_x1, trajectory_x2, linestyle='-', linewidth=2, color='orange')
 
-        for i in range(len(y_new)):
-            # Garantir que estamos pegando apenas 1 ponto por época
-            trajectory_x1.append(y_new[i][0])  # Adiciona x1
-            trajectory_x2.append(y_new[i][1])  # Adiciona x2
+    # Calculando os valores da função objetivo para os pontos inicial e final
+    obj_initial = data.obj_fn(np.array([[y1_new_history[0], y2_new_history[0]]]))  # Ajuste aqui
+    obj_final = data.obj_fn(np.array([[y1_new_history[-1], y2_new_history[-1]]]))  # Ajuste aqui
 
-        # Plotando a linha que conecta todos os pontos evoluídos
-        ax.plot(trajectory_x1, trajectory_x2, label=f'Evolução no Ponto {point_index+1}', linestyle='-', linewidth=2)
+    # Extrair os valores escalares da função objetivo (assumindo que obj_fn retorna um array)
+    obj_initial_value = obj_initial.item() if isinstance(obj_initial, np.ndarray) else obj_initial
+    obj_final_value = obj_final.item() if isinstance(obj_final, np.ndarray) else obj_final
 
-        # Plotando os pontos de y_new sobre os contornos, incluindo intermediários
-        scatter = ax.scatter(trajectory_x1[1:], trajectory_x2[1:], c=data.obj_fn(np.array([trajectory_x1[1:], trajectory_x2[1:]]).T), cmap='viridis', edgecolors='black', label=f'Pontos {point_index+1}')
-        
-        # Destacando o ponto final em vermelho
-        ax.scatter(trajectory_x1[-1], trajectory_x2[-1], color='red', label='Ponto Final')
-        
-        # Calculando e mostrando as distâncias percorridas entre os pontos
-#        for i in range(1, len(trajectory_x1)):
-#            distance = np.sqrt((trajectory_x1[i] - trajectory_x1[i-1])**2 + (trajectory_x2#[i] - trajectory_x2[i-1])**2)
-#            print(f"Distância percorrida entre o ponto {i} e o ponto {i+1}: {distance:.2f}")
-        
-    else:
-        print("Índice de ponto inválido!")
+    # Plotando os pontos inicial e final com marcadores diferentes
+    ax.scatter(trajectory_x1[0], trajectory_x2[0], color='green', zorder=5, 
+               label=f'Ponto Inicial: ({y1_new_history[0]:.2f}, {y2_new_history[0]:.2f}), Obj = {obj_initial_value:.2f}', s=100, edgecolors='black')  # Ponto inicial
+    ax.scatter(trajectory_x1[-1], trajectory_x2[-1], color='red', zorder=5, 
+               label=f'Ponto Final: ({y1_new_history[-1]:.2f}, {y2_new_history[-1]:.2f}), Obj = {obj_final_value:.2f}', s=100, edgecolors='black')  # Ponto final
 
-    # Adicionando barra de cores apenas se 'scatter' foi inicializado
+    # Barra de cores para os pontos intermediários (não é necessário para legendas)
+    scatter = ax.scatter(trajectory_x1[1:], trajectory_x2[1:], 
+                         c=data.obj_fn(np.array([trajectory_x1[1:], trajectory_x2[1:]]).T), 
+                         cmap='viridis', edgecolors='black')
+
+    # Barra de cores (caso haja)
     if scatter is not None:
         plt.colorbar(scatter, label="Objetivo")
 
-    # Adicionando título e labels
-    plt.title("Contours of the objective function with model output points")    
+    # Títulos e labels
+    plt.title("Contours da função objetivo com pontos de saída do modelo")
     plt.xlabel("x1")
     plt.ylabel("x2")
     plt.grid(True)
-
-    # Adicionando legenda
+    
+    # Exibindo a legenda
     plt.legend()
 
     # Exibindo o gráfico
